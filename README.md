@@ -1,3 +1,5 @@
+# 🚀 Download
+[**Download the latest release**](https://github.com/giaquy2000and4/EBS-tool-pack/releases)
 
 # EBS-Tool-Pack: YouTube Subtitle Extractor GUI
 
