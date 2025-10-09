@@ -3,7 +3,7 @@
 
 **EBS-Tool-Pack** is a graphical application designed to extract English subtitles from YouTube videos using `yt-dlp`. It provides a user-friendly interface for entering one or more YouTube URLs and saving the extracted subtitles as sequentially numbered `.txt` files.
 
-![Main Screen](screenshots/main screen.png)
+<img src="screenshots/main screen.png" width="600" alt="Main screen" />
 
 ---
 
