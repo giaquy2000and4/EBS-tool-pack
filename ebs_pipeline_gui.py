@@ -359,7 +359,7 @@ class EBSToolPackGUI:
             fg_color=self.colors['bg'],
             border_color=self.colors['accent']
         )
-        self.start_num_entry.insert(0, "1")
+        self.start_num_entry.insert(0, "1") #
         self.start_num_entry.pack(fill="x", padx=15, pady=(0, 10))
         self.start_num_entry.bind("<KeyRelease>", self._update_end_num_label)
 
@@ -382,10 +382,10 @@ class EBSToolPackGUI:
         )
         self.end_num_label.pack(anchor="w", padx=15, pady=(0, 10))
 
-        # Output Directory
-        self._add_input_section(input_panel, "Output Directory")
+        # Output Directory and File Naming
+        self._add_input_section(input_panel, "Output Configuration")
 
-        ctk.CTkLabel(input_panel, text="Output folder (leave empty for auto-create):",
+        ctk.CTkLabel(input_panel, text="Output root folder (leave empty for auto-create):",
                      text_color=self.colors['text']).pack(anchor="w", padx=15, pady=(10, 0))
         dir_input_frame = ctk.CTkFrame(input_panel, fg_color="transparent")
         dir_input_frame.pack(fill="x", padx=15, pady=5)
@@ -407,6 +407,39 @@ class EBSToolPackGUI:
             width=80
         )
         self.browse_dest_dir_button.pack(side="left")
+
+        ctk.CTkLabel(input_panel, text="Folder Prefix (e.g., 'Ebs-'):",
+                     text_color=self.colors['text']).pack(anchor="w", padx=15, pady=(10, 0))
+        self.folder_prefix_entry = ctk.CTkEntry(
+            input_panel,
+            placeholder_text="Ebs-",
+            fg_color=self.colors['bg'],
+            border_color=self.colors['accent']
+        )
+        self.folder_prefix_entry.insert(0, "Ebs-") #
+        self.folder_prefix_entry.pack(fill="x", padx=15, pady=(0, 10))
+
+        ctk.CTkLabel(input_panel, text="Subtitle File Prefix (e.g., 'bcl-'):",
+                     text_color=self.colors['text']).pack(anchor="w", padx=15, pady=(10, 0))
+        self.subtitle_file_prefix_entry = ctk.CTkEntry(
+            input_panel,
+            placeholder_text="bcl-",
+            fg_color=self.colors['bg'],
+            border_color=self.colors['accent']
+        )
+        self.subtitle_file_prefix_entry.insert(0, "bcl-") #
+        self.subtitle_file_prefix_entry.pack(fill="x", padx=15, pady=(0, 10))
+
+        ctk.CTkLabel(input_panel, text="Content File Prefix (e.g., 'Content-', no extension):",
+                     text_color=self.colors['text']).pack(anchor="w", padx=15, pady=(10, 0))
+        self.content_file_prefix_entry = ctk.CTkEntry(
+            input_panel,
+            placeholder_text="Content-",
+            fg_color=self.colors['bg'],
+            border_color=self.colors['accent']
+        )
+        self.content_file_prefix_entry.insert(0, "Content-") #
+        self.content_file_prefix_entry.pack(fill="x", padx=15, pady=(0, 10))
 
         # Start Button
         self.start_button = ctk.CTkButton(
@@ -619,16 +652,24 @@ class EBSToolPackGUI:
 
         dest_dir = self.dest_dir_entry.get().strip()
         if not dest_dir:
-            dest_dir = os.path.join(os.getcwd(), "Downloaded-Sub")
+            dest_dir = os.path.join(os.getcwd(), "Downloaded-Sub") #
             self.gui_log_output(f"No output directory specified. Using: {dest_dir}", "yellow")
 
+        # Get new prefix values
+        folder_prefix = self.folder_prefix_entry.get().strip()
+        subtitle_file_prefix = self.subtitle_file_prefix_entry.get().strip()
+        content_file_prefix = self.content_file_prefix_entry.get().strip()
+
+        # No need to pre-create the root dest_dir here, it will be done on first file save if it doesn't exist.
+        # However, for consistency and error checking, we can ensure the root exists.
         if not os.path.exists(dest_dir):
             try:
-                os.makedirs(dest_dir, exist_ok=True)
-                self.gui_log_output(f"Created output directory: {dest_dir}", "green")
+                os.makedirs(dest_dir, exist_ok=True) #
+                self.gui_log_output(f"Created output root directory: {dest_dir}", "green")
             except Exception as e:
-                messagebox.showerror("Directory error", f"Cannot create directory: {e}")
+                messagebox.showerror("Directory error", f"Cannot create root directory: {e}")
                 return
+
 
         if not self.urls_to_process:
             messagebox.showwarning("No URLs", "Please add at least one YouTube URL to process.")
@@ -645,7 +686,9 @@ class EBSToolPackGUI:
         self.pipeline_running = True
         self.gui_log_output("Pipeline started!", "blue")
 
-        threading.Thread(target=self._run_pipeline, args=(start_num, pad_width, dest_dir), daemon=True).start()
+        threading.Thread(target=self._run_pipeline,
+                         args=(start_num, pad_width, dest_dir, folder_prefix, subtitle_file_prefix, content_file_prefix),
+                         daemon=True).start()
 
     def _toggle_ui_state(self, enable: bool):
         """Enable/disable input widgets and buttons"""
@@ -654,6 +697,10 @@ class EBSToolPackGUI:
         self.start_num_entry.configure(state=state)
         self.pad_width_entry.configure(state=state)
         self.dest_dir_entry.configure(state=state)
+        self.folder_prefix_entry.configure(state=state)
+        self.subtitle_file_prefix_entry.configure(state=state)
+        self.content_file_prefix_entry.configure(state=state)
+
         self.start_button.configure(state=state)
         self.add_url_button.configure(state=state)
         self.browse_url_file_button.configure(state=state)
@@ -678,7 +725,8 @@ class EBSToolPackGUI:
         else:
             self.root.after(0, lambda: self.pipeline_progress_bar.set(0))
 
-    def _run_pipeline(self, start_num: int, pad_width: int, dest_dir: str):
+    def _run_pipeline(self, start_num: int, pad_width: int, dest_dir: str,
+                       folder_prefix: str, subtitle_file_prefix: str, content_file_prefix: str):
         try:
             self.gui_log_output("\n--- Starting YouTube Subtitle Extraction ---", "blue")
             self._update_progress_gui(0, len(self.urls_to_process), "Preparing...")
@@ -729,33 +777,52 @@ class EBSToolPackGUI:
                     return
 
                 file_num = start_num + idx
-                filename = f"{file_num:0{pad_width}d}.txt"
-                filepath = os.path.join(dest_dir, filename)
+                numbered_suffix = f"{file_num:0{pad_width}d}"
+
+                # Construct the specific output folder for this video
+                current_video_folder = os.path.join(dest_dir, f"{folder_prefix}{numbered_suffix}") #
+                os.makedirs(current_video_folder, exist_ok=True) #
+                self.gui_log_output(f"Created folder: {current_video_folder}", "blue")
+
+                # Subtitle file
+                subtitle_filename = f"{subtitle_file_prefix}{numbered_suffix}.txt"
+                subtitle_filepath = os.path.join(current_video_folder, subtitle_filename) #
+
+                # Content file (empty)
+                content_filename = f"{content_file_prefix}{numbered_suffix}" # No .txt extension
+                content_filepath = os.path.join(current_video_folder, content_filename) #
+
 
                 if r.get('status') != 'success':
                     error_msg = r.get('error', 'Unknown error')
-                    with open(filepath, 'w', encoding='utf-8') as f:
+                    with open(subtitle_filepath, 'w', encoding='utf-8') as f:
                         f.write(f"ERROR: {error_msg}\n")
                         f.write(f"URL: {r.get('url', 'N/A')}\n")
-                    self.gui_log_output(f"⚠ Saved error note: {filename}", "yellow")
-                    continue
+                    self.gui_log_output(f"⚠ Saved error note for {subtitle_filename} in {os.path.basename(current_video_folder)}", "yellow")
+                else:
+                    subtitle_content = r.get('subtitles', 'No subtitles available')
+                    try:
+                        with open(subtitle_filepath, 'w', encoding='utf-8') as f:
+                            f.write(subtitle_content)
+                        saved_count += 1
+                        self.gui_log_output(f"✓ Saved subtitle: {subtitle_filename} - {r.get('title', 'Unknown')}", "green")
+                    except Exception as e:
+                        self.gui_log_output(f"✗ Error saving subtitle {subtitle_filename}: {e}", "red")
 
-                subtitle_content = r.get('subtitles', 'No subtitles available')
-
+                # Create the empty content file regardless of subtitle success
                 try:
-                    with open(filepath, 'w', encoding='utf-8') as f:
-                        f.write(subtitle_content)
-                    saved_count += 1
-                    self.gui_log_output(f"✓ Saved: {filename} - {r.get('title', 'Unknown')}", "green")
+                    with open(content_filepath, 'w', encoding='utf-8') as f:
+                        f.write("")
+                    self.gui_log_output(f"✓ Created empty content file: {content_filename}", "green")
                 except Exception as e:
-                    self.gui_log_output(f"✗ Error saving {filename}: {e}", "red")
+                    self.gui_log_output(f"✗ Error creating content file {content_filename}: {e}", "red")
 
-                self._update_progress_gui(idx + 1, len(results), f"Saving file {idx + 1}/{len(results)}")
+                self._update_progress_gui(idx + 1, len(results), f"Saving files for video {idx + 1}/{len(results)}")
 
-            self.gui_log_output(f"\n→ Successfully saved {saved_count}/{len(results)} subtitle files to: {dest_dir}",
+            self.gui_log_output(f"\n→ Successfully processed {saved_count}/{len(results)} videos with files saved to subfolders under: {dest_dir}",
                                 "green")
             messagebox.showinfo("Pipeline Complete",
-                                f"Successfully saved {saved_count} subtitle files!\n\nOutput: {dest_dir}")
+                                f"Successfully processed {saved_count} videos!\n\nOutput root: {dest_dir}")
 
         except Exception as e:
             error_msg = f"Critical error occurred: {e}"
