@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-EBS-Tool-Pack - English YouTube Subtitle Extractor
-Extracts English subtitles from YouTube videos and saves them as numbered files.
-"""
+
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
