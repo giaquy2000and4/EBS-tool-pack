@@ -22,8 +22,7 @@ echo.
 echo Dang tien hanh build "%APP_NAME%.exe"...
 :: Lenh co icon
 pyinstaller --noconsole --onefile --name "%APP_NAME%" --icon "%ICON_FILE%" "%SCRIPT_NAME%"
-:: Hoac lenh khong co icon (neu ban khong co file icon.ico):
-:: pyinstaller --noconsole --onefile --name "%APP_NAME%" "%SCRIPT_NAME%"
+
 
 IF %ERRORLEVEL% NEQ 0 (
     echo.
