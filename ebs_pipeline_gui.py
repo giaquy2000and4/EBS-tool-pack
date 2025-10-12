@@ -776,7 +776,7 @@ class EBSToolPackGUI:
                 file_num = start_num + idx
                 numbered_suffix = f"{file_num:0{pad_width}d}"
 
-                # Construct the specific output folder for this video
+                
                 current_video_folder = os.path.join(dest_dir, f"{folder_prefix}{numbered_suffix}") #
                 os.makedirs(current_video_folder, exist_ok=True) #
                 self.gui_log_output(f"Created folder: {current_video_folder}", "blue")
@@ -806,7 +806,7 @@ class EBSToolPackGUI:
                     except Exception as e:
                         self.gui_log_output(f"✗ Error saving subtitle {subtitle_filename}: {e}", "red")
 
-                # Create the empty content file regardless of subtitle success
+                
                 try:
                     with open(content_filepath, 'w', encoding='utf-8') as f:
                         f.write("")
