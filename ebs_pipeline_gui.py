@@ -888,7 +888,7 @@ class EBSToolPackGUI:
                 subtitle_filepath = os.path.join(current_video_folder, subtitle_filename)
 
                 # Content file (empty)
-                content_filename = f"{content_file_prefix}{numbered_suffix}" # No .txt extension
+                content_filename = f"{content_file_prefix}{numbered_suffix}.txt" # No .txt extension
                 content_filepath = os.path.join(current_video_folder, content_filename)
 
 
