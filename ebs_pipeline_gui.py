@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-
-
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import os
@@ -97,33 +92,42 @@ def clean_subtitles(subtitle_content):
     return "\n".join(out) or "Unable to extract subtitle content"
 
 
-def get_english_subtitles(info):
-    """Get English subtitles from video info"""
+# MODIFIED: get_english_subtitles -> get_subtitles (now takes lang_code)
+def get_subtitles(info: Dict[str, Any], lang_code: str):
+    """Get subtitles for a specific language from video info"""
     try:
         subs = info.get('subtitles', {}) or {}
         auto = info.get('automatic_captions', {}) or {}
 
-        # Try manual English subtitles first
-        if 'en' in subs:
-            url = subs['en'][0]['url']
+        # Prioritize manual subtitles for the specified language
+        if lang_code in subs:
+            url = subs[lang_code][0]['url']
             text = download_subtitle_content(url)
             if text:
                 return clean_subtitles(text)
 
-        # Try automatic English captions
-        for lang_code in ['en', 'en-US', 'en-GB']:
-            if lang_code in auto:
-                url = auto[lang_code][0]['url']
+        # Then try automatic captions for the specified language
+        # Include common variants for English, otherwise use exact code
+        lang_codes_to_try = [lang_code]
+        if lang_code.lower() == 'en':
+            lang_codes_to_try = ['en', 'en-US', 'en-GB']
+        # Add other common variants if needed, e.g., for Portuguese: ['pt', 'pt-BR', 'pt-PT']
+
+        for lc in lang_codes_to_try:
+            if lc in auto:
+                url = auto[lc][0]['url']
                 text = download_subtitle_content(url)
                 if text:
                     return clean_subtitles(text)
 
-        return "No English subtitles available"
+        return f"No {lang_code} subtitles available"
     except Exception as e:
-        return f"Error downloading subtitles: {e}"
+        return f"Error downloading subtitles for {lang_code}: {e}"
 
 
-def get_video_info(url: str, log_func: Callable[[str, Optional[str]], None]):
+# MODIFIED: get_video_info to accept selected_lang and cookie_file_path
+def get_video_info(url: str, log_func: Callable[[str, Optional[str]], None],
+                   selected_lang: str = 'en', cookie_file_path: Optional[str] = None):
     """Get video information and subtitles"""
     if not YTDLP_AVAILABLE:
         return {'url': url, 'status': 'error', 'error': 'yt-dlp is not available.'}
@@ -136,14 +140,23 @@ def get_video_info(url: str, log_func: Callable[[str, Optional[str]], None]):
             'sleep_interval': 20,
             'max_sleep_interval': 25,
             'retries': 5,
+            # Ensure yt-dlp extracts subtitle metadata, even if we download content ourselves
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': [selected_lang], # Hint yt-dlp to look for this language
         }
+        if cookie_file_path and os.path.exists(cookie_file_path):
+            ydl_opts['cookiefile'] = cookie_file_path
+            log_func(f"Using cookie file: {os.path.basename(cookie_file_path)}", "blue")
+
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return {
                 'title': info.get('title', 'No title'),
                 'video_id': info.get('id', 'unknown'),
                 'url': url,
-                'subtitles': get_english_subtitles(info),
+                'subtitles': get_subtitles(info, selected_lang), # Call the modified function
                 'status': 'success'
             }
     except Exception as e:
@@ -356,7 +369,7 @@ class EBSToolPackGUI:
             fg_color=self.colors['bg'],
             border_color=self.colors['accent']
         )
-        self.start_num_entry.insert(0, "1") #
+        self.start_num_entry.insert(0, "1")
         self.start_num_entry.pack(fill="x", padx=15, pady=(0, 10))
         self.start_num_entry.bind("<KeyRelease>", self._update_end_num_label)
 
@@ -413,7 +426,7 @@ class EBSToolPackGUI:
             fg_color=self.colors['bg'],
             border_color=self.colors['accent']
         )
-        self.folder_prefix_entry.insert(0, "Ebs-") #
+        self.folder_prefix_entry.insert(0, "Ebs-")
         self.folder_prefix_entry.pack(fill="x", padx=15, pady=(0, 10))
 
         ctk.CTkLabel(input_panel, text="Subtitle File Prefix (e.g., 'bcl-'):",
@@ -424,7 +437,7 @@ class EBSToolPackGUI:
             fg_color=self.colors['bg'],
             border_color=self.colors['accent']
         )
-        self.subtitle_file_prefix_entry.insert(0, "bcl-") #
+        self.subtitle_file_prefix_entry.insert(0, "bcl-")
         self.subtitle_file_prefix_entry.pack(fill="x", padx=15, pady=(0, 10))
 
         ctk.CTkLabel(input_panel, text="Content File Prefix (e.g., 'Content-', no extension):",
@@ -435,8 +448,46 @@ class EBSToolPackGUI:
             fg_color=self.colors['bg'],
             border_color=self.colors['accent']
         )
-        self.content_file_prefix_entry.insert(0, "Content-") #
+        self.content_file_prefix_entry.insert(0, "Content-")
         self.content_file_prefix_entry.pack(fill="x", padx=15, pady=(0, 10))
+
+        # NEW: Subtitle Language and Cookie Options
+        self._add_input_section(input_panel, "Extraction Options")
+
+        ctk.CTkLabel(input_panel, text="Subtitle Language (e.g., 'en', 'vi', 'ko'):",
+                     text_color=self.colors['text']).pack(anchor="w", padx=15, pady=(10, 0))
+        self.subtitle_lang_entry = ctk.CTkEntry(
+            input_panel,
+            placeholder_text="en",
+            fg_color=self.colors['bg'],
+            border_color=self.colors['accent']
+        )
+        self.subtitle_lang_entry.insert(0, "en") # Default to English
+        self.subtitle_lang_entry.pack(fill="x", padx=15, pady=(0, 10))
+
+        ctk.CTkLabel(input_panel, text="Cookie File (.txt, optional, for age-restricted/private videos):",
+                     text_color=self.colors['text']).pack(anchor="w", padx=15, pady=(10, 0))
+        cookie_file_frame = ctk.CTkFrame(input_panel, fg_color="transparent")
+        cookie_file_frame.pack(fill="x", padx=15, pady=5)
+        self.cookie_file_entry = ctk.CTkEntry(
+            cookie_file_frame,
+            placeholder_text="Path to www.youtube.com_cookies.txt",
+            fg_color=self.colors['bg'],
+            border_color=self.colors['accent']
+        )
+        self.cookie_file_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.browse_cookie_file_button = ctk.CTkButton(
+            cookie_file_frame,
+            text="Browse",
+            command=self._browse_cookie_file,
+            fg_color=self.colors['card'],
+            border_width=1,
+            border_color=self.colors['accent'],
+            hover_color=self.colors['accent_hover'],
+            width=80
+        )
+        self.browse_cookie_file_button.pack(side="left")
+
 
         # Start Button
         self.start_button = ctk.CTkButton(
@@ -604,6 +655,20 @@ class EBSToolPackGUI:
             self.dest_dir_entry.delete(0, "end")
             self.dest_dir_entry.insert(0, directory)
 
+    # NEW: Browse cookie file method
+    def _browse_cookie_file(self):
+        file_path = filedialog.askopenfilename(
+            parent=self.root,
+            title="Select YouTube cookie file (.txt)",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            initialdir=os.path.expanduser("~")
+        )
+        if file_path:
+            self.cookie_file_entry.delete(0, "end")
+            self.cookie_file_entry.insert(0, file_path)
+            self.gui_log_output(f"Cookie file selected: {os.path.basename(file_path)}", "blue")
+
+
     def _update_end_num_label(self, event=None):
         try:
             start_num = int(self.start_num_entry.get() or "1")
@@ -619,7 +684,10 @@ class EBSToolPackGUI:
                     pad_width = 0
 
                 if pad_width <= 0:
-                    pad_width = max(1, len(str(end_num)))
+                    # Auto-calculate pad_width if not specified or invalid
+                    # It should be at least 1, and enough to fit the largest number
+                    pad_width = max(1, len(str(max(start_num, end_num))))
+
 
                 formatted_end = f"{end_num:0{pad_width}d}"
                 self.end_num_label.configure(text=f"End number: {formatted_end}")
@@ -649,7 +717,7 @@ class EBSToolPackGUI:
 
         dest_dir = self.dest_dir_entry.get().strip()
         if not dest_dir:
-            dest_dir = os.path.join(os.getcwd(), "Downloaded-Sub") #
+            dest_dir = os.path.join(os.getcwd(), "Downloaded-Sub")
             self.gui_log_output(f"No output directory specified. Using: {dest_dir}", "yellow")
 
         # Get new prefix values
@@ -657,11 +725,23 @@ class EBSToolPackGUI:
         subtitle_file_prefix = self.subtitle_file_prefix_entry.get().strip()
         content_file_prefix = self.content_file_prefix_entry.get().strip()
 
-        # No need to pre-create the root dest_dir here, it will be done on first file save if it doesn't exist.
-        # However, for consistency and error checking, we can ensure the root exists.
+        # NEW: Get subtitle language and cookie file path
+        selected_lang = self.subtitle_lang_entry.get().strip()
+        if not selected_lang:
+            selected_lang = "en"
+            self.gui_log_output(f"No subtitle language specified. Defaulting to '{selected_lang}'.", "yellow")
+
+        cookie_file_path = self.cookie_file_entry.get().strip()
+        if cookie_file_path and not os.path.exists(cookie_file_path):
+            messagebox.showerror("Cookie File Error", f"Cookie file not found at: {cookie_file_path}")
+            return
+        elif not cookie_file_path:
+            self.gui_log_output("No cookie file specified. Proceeding without it.", "yellow")
+
+
         if not os.path.exists(dest_dir):
             try:
-                os.makedirs(dest_dir, exist_ok=True) #
+                os.makedirs(dest_dir, exist_ok=True)
                 self.gui_log_output(f"Created output root directory: {dest_dir}", "green")
             except Exception as e:
                 messagebox.showerror("Directory error", f"Cannot create root directory: {e}")
@@ -684,7 +764,8 @@ class EBSToolPackGUI:
         self.gui_log_output("Pipeline started!", "blue")
 
         threading.Thread(target=self._run_pipeline,
-                         args=(start_num, pad_width, dest_dir, folder_prefix, subtitle_file_prefix, content_file_prefix),
+                         args=(start_num, pad_width, dest_dir, folder_prefix, subtitle_file_prefix,
+                               content_file_prefix, selected_lang, cookie_file_path), # Pass new args
                          daemon=True).start()
 
     def _toggle_ui_state(self, enable: bool):
@@ -697,12 +778,19 @@ class EBSToolPackGUI:
         self.folder_prefix_entry.configure(state=state)
         self.subtitle_file_prefix_entry.configure(state=state)
         self.content_file_prefix_entry.configure(state=state)
+        # NEW: toggle new widgets
+        self.subtitle_lang_entry.configure(state=state)
+        self.cookie_file_entry.configure(state=state)
+
 
         self.start_button.configure(state=state)
         self.add_url_button.configure(state=state)
         self.browse_url_file_button.configure(state=state)
         self.clear_urls_button.configure(state=state)
         self.browse_dest_dir_button.configure(state=state)
+        # NEW: toggle new buttons
+        self.browse_cookie_file_button.configure(state=state)
+
 
         self.cancel_button.configure(state="normal" if not enable else "disabled")
         if not enable:
@@ -722,8 +810,10 @@ class EBSToolPackGUI:
         else:
             self.root.after(0, lambda: self.pipeline_progress_bar.set(0))
 
+    # MODIFIED: _run_pipeline to accept selected_lang and cookie_file_path
     def _run_pipeline(self, start_num: int, pad_width: int, dest_dir: str,
-                       folder_prefix: str, subtitle_file_prefix: str, content_file_prefix: str):
+                       folder_prefix: str, subtitle_file_prefix: str, content_file_prefix: str,
+                       selected_lang: str, cookie_file_path: Optional[str]):
         try:
             self.gui_log_output("\n--- Starting YouTube Subtitle Extraction ---", "blue")
             self._update_progress_gui(0, len(self.urls_to_process), "Preparing...")
@@ -744,13 +834,25 @@ class EBSToolPackGUI:
                 existing_index, _ = load_existing_index('youtube_results.json')
 
                 if vid and vid in existing_index:
-                    r = existing_index[vid]
-                    r.setdefault('url', url)
-                    r.setdefault('status', 'success')
-                    results.append(r)
-                    self.gui_log_output(f"↷ Using cached result for: {url}", "blue")
+                    cached_item = existing_index[vid]
+                    # If cached result looks like it has content and was successful, use it.
+                    # Otherwise, re-extract for the current selected_lang.
+                    if cached_item.get('status') == 'success' and \
+                       not cached_item.get('subtitles', '').startswith("No ") and \
+                       not cached_item.get('subtitles', '').startswith("Error downloading"):
+                        r = cached_item
+                        r.setdefault('url', url) # Ensure url is present
+                        self.gui_log_output(f"↷ Using cached result for: {url}", "blue")
+                    else:
+                        # Cached item is either an error, or explicitly says 'No subtitles available',
+                        # or was a previous run that failed. Re-extract for the current selected_lang.
+                        self.gui_log_output(f"Cached result for {url} needs re-extraction.", "yellow")
+                        r = get_video_info(url, self.gui_log_output, selected_lang, cookie_file_path)
+                        r.setdefault('url', url) # Ensure url is present
+                        status_msg = f"{'✓ OK' if r.get('status') == 'success' else '✗ Error'} - {url}"
+                        self.gui_log_output(status_msg, "green" if r.get('status') == 'success' else "red")
                 else:
-                    r = get_video_info(url, self.gui_log_output)
+                    r = get_video_info(url, self.gui_log_output, selected_lang, cookie_file_path) # Pass new args
                     results.append(r)
                     status_msg = f"{'✓ OK' if r.get('status') == 'success' else '✗ Error'} - {url}"
                     self.gui_log_output(status_msg, "green" if r.get('status') == 'success' else "red")
@@ -776,18 +878,18 @@ class EBSToolPackGUI:
                 file_num = start_num + idx
                 numbered_suffix = f"{file_num:0{pad_width}d}"
 
-                
-                current_video_folder = os.path.join(dest_dir, f"{folder_prefix}{numbered_suffix}") #
-                os.makedirs(current_video_folder, exist_ok=True) #
+
+                current_video_folder = os.path.join(dest_dir, f"{folder_prefix}{numbered_suffix}")
+                os.makedirs(current_video_folder, exist_ok=True)
                 self.gui_log_output(f"Created folder: {current_video_folder}", "blue")
 
                 # Subtitle file
                 subtitle_filename = f"{subtitle_file_prefix}{numbered_suffix}.txt"
-                subtitle_filepath = os.path.join(current_video_folder, subtitle_filename) #
+                subtitle_filepath = os.path.join(current_video_folder, subtitle_filename)
 
                 # Content file (empty)
                 content_filename = f"{content_file_prefix}{numbered_suffix}" # No .txt extension
-                content_filepath = os.path.join(current_video_folder, content_filename) #
+                content_filepath = os.path.join(current_video_folder, content_filename)
 
 
                 if r.get('status') != 'success':
@@ -797,7 +899,7 @@ class EBSToolPackGUI:
                         f.write(f"URL: {r.get('url', 'N/A')}\n")
                     self.gui_log_output(f"⚠ Saved error note for {subtitle_filename} in {os.path.basename(current_video_folder)}", "yellow")
                 else:
-                    subtitle_content = r.get('subtitles', 'No subtitles available')
+                    subtitle_content = r.get('subtitles', f'No {selected_lang} subtitles available') # Use selected_lang in default message
                     try:
                         with open(subtitle_filepath, 'w', encoding='utf-8') as f:
                             f.write(subtitle_content)
@@ -806,7 +908,7 @@ class EBSToolPackGUI:
                     except Exception as e:
                         self.gui_log_output(f"✗ Error saving subtitle {subtitle_filename}: {e}", "red")
 
-                
+
                 try:
                     with open(content_filepath, 'w', encoding='utf-8') as f:
                         f.write("")
