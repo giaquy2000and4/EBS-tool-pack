@@ -136,8 +136,7 @@ def get_video_info(url: str, log_func: Callable[[str, Optional[str]], None],
             'no_warnings': True,
             'extractaudio': False,
             'extract_flat': False,
-            'sleep_interval': 20,
-            'max_sleep_interval': 25,
+            # Removed sleep_interval and max_sleep_interval here as they are now handled by the GUI logic
             'retries': 5,
             # Ensure yt-dlp extracts subtitle metadata, even if we download content ourselves
             'writesubtitles': True,
@@ -264,6 +263,11 @@ class EBSToolPackGUI:
         self.stop_pipeline_flag = False
         self.use_title_for_subtitle_filename = ctk.BooleanVar(value=False)  # New state variable
 
+        # NEW: Rate Limit State Variables
+        self.rate_limit_enabled = ctk.BooleanVar(value=True)  # Default: Rate limit is ON
+        self.min_wait_entry: Optional[ctk.CTkEntry] = None
+        self.max_wait_entry: Optional[ctk.CTkEntry] = None
+
         # Main container
         self.main_container = ctk.CTkFrame(self.root, fg_color=self.colors['bg'])
         self.main_container.pack(fill="both", expand=True, padx=20, pady=20)
@@ -300,6 +304,46 @@ class EBSToolPackGUI:
         # Left Panel: Inputs
         input_panel = ctk.CTkScrollableFrame(content_frame, fg_color=self.colors['card'], corner_radius=10)
         input_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10), pady=0)
+
+        # NEW SECTION: Rate Limit Configuration (Moved to top)
+        self._add_input_section(input_panel, "Rate Limit Configuration")
+
+        rate_limit_frame = ctk.CTkFrame(input_panel, fg_color="transparent")
+        rate_limit_frame.pack(fill="x", padx=15, pady=(5, 10))
+
+        self.rate_limit_checkbox = ctk.CTkCheckBox(
+            rate_limit_frame,
+            text="Enable Rate Limit (delay between video processing)",
+            variable=self.rate_limit_enabled,
+            command=self._toggle_rate_limit_inputs,
+            text_color=self.colors['text'],
+            hover_color=self.colors['accent_hover'],
+            fg_color=self.colors['accent']
+        )
+        self.rate_limit_checkbox.pack(anchor="w", pady=(0, 10))
+
+        ctk.CTkLabel(rate_limit_frame, text="Min wait time (seconds):", text_color=self.colors['text']).pack(
+            anchor="w", pady=(0, 0))
+        self.min_wait_entry = ctk.CTkEntry(
+            rate_limit_frame,
+            placeholder_text="20",
+            fg_color=self.colors['bg'],
+            border_color=self.colors['accent']
+        )
+        self.min_wait_entry.insert(0, "20") # Default min wait time
+        self.min_wait_entry.pack(fill="x", pady=(0, 5))
+
+        ctk.CTkLabel(rate_limit_frame, text="Max wait time (seconds):", text_color=self.colors['text']).pack(
+            anchor="w", pady=(0, 0))
+        self.max_wait_entry = ctk.CTkEntry(
+            rate_limit_frame,
+            placeholder_text="25",
+            fg_color=self.colors['bg'],
+            border_color=self.colors['accent']
+        )
+        self.max_wait_entry.insert(0, "25") # Default max wait time
+        self.max_wait_entry.pack(fill="x", pady=(0, 10))
+        self._toggle_rate_limit_inputs() # Set initial state based on checkbox
 
         # URL Input Section
         self._add_input_section(input_panel, "YouTube URLs")
@@ -709,6 +753,14 @@ class EBSToolPackGUI:
                 self.subtitle_file_prefix_entry.insert(0, "bcl-")
             self.gui_log_output("Subtitle filename will use custom prefix. Prefix entry enabled.", "blue")
 
+    # NEW: Toggle Rate Limit Input Fields
+    def _toggle_rate_limit_inputs(self):
+        state = "normal" if self.rate_limit_enabled.get() else "disabled"
+        if self.min_wait_entry:
+            self.min_wait_entry.configure(state=state)
+        if self.max_wait_entry:
+            self.max_wait_entry.configure(state=state)
+
     def _update_end_num_label(self, event=None):
         try:
             start_num = int(self.start_num_entry.get() or "1")
@@ -778,6 +830,24 @@ class EBSToolPackGUI:
         elif not cookie_file_path:
             self.gui_log_output("No cookie file specified. Proceeding without it.", "yellow")
 
+        # NEW: Get Rate Limit Configuration
+        rate_limit_enabled = self.rate_limit_enabled.get()
+        min_wait_time = 0
+        max_wait_time = 0
+        if rate_limit_enabled:
+            try:
+                min_wait_time = int(self.min_wait_entry.get())
+                max_wait_time = int(self.max_wait_entry.get())
+                if min_wait_time < 0 or max_wait_time < 0:
+                    messagebox.showerror("Invalid Rate Limit", "Min/Max wait times cannot be negative.")
+                    return
+                if min_wait_time > max_wait_time:
+                    messagebox.showerror("Invalid Rate Limit", "Min wait time cannot be greater than Max wait time.")
+                    return
+            except ValueError:
+                messagebox.showerror("Invalid Rate Limit", "Min/Max wait times must be integers.")
+                return
+
         if not os.path.exists(dest_dir):
             try:
                 os.makedirs(dest_dir, exist_ok=True)
@@ -803,7 +873,8 @@ class EBSToolPackGUI:
 
         threading.Thread(target=self._run_pipeline,
                          args=(start_num, pad_width, dest_dir, folder_prefix, subtitle_file_prefix,
-                               content_file_prefix, selected_lang, cookie_file_path),  # Pass new args
+                               content_file_prefix, selected_lang, cookie_file_path,
+                               rate_limit_enabled, min_wait_time, max_wait_time),  # Pass new args
                          daemon=True).start()
 
     def _toggle_ui_state(self, enable: bool):
@@ -835,6 +906,17 @@ class EBSToolPackGUI:
         self.browse_cookie_file_button.configure(state=state)
         self.use_title_checkbox.configure(state=state)  # Toggle the new checkbox
 
+        # NEW: Toggle Rate Limit Widgets
+        self.rate_limit_checkbox.configure(state=state)
+        # The min/max wait entries depend on both the global state AND the checkbox state
+        if enable and self.rate_limit_enabled.get():
+            self.min_wait_entry.configure(state="normal")
+            self.max_wait_entry.configure(state="normal")
+        else:
+            self.min_wait_entry.configure(state="disabled")
+            self.max_wait_entry.configure(state="disabled")
+
+
         self.cancel_button.configure(state="normal" if not enable else "disabled")
         if not enable:
             self.cancel_button.configure(text="Stopping...")
@@ -853,10 +935,11 @@ class EBSToolPackGUI:
         else:
             self.root.after(0, lambda: self.pipeline_progress_bar.set(0))
 
-    # MODIFIED: _run_pipeline to accept selected_lang and cookie_file_path
+    # MODIFIED: _run_pipeline to accept rate_limit_enabled, min_wait_time, max_wait_time
     def _run_pipeline(self, start_num: int, pad_width: int, dest_dir: str,
                       folder_prefix: str, subtitle_file_prefix: str, content_file_prefix: str,
-                      selected_lang: str, cookie_file_path: Optional[str]):
+                      selected_lang: str, cookie_file_path: Optional[str],
+                      rate_limit_enabled: bool, min_wait_time: int, max_wait_time: int):
         try:
             self.gui_log_output("\n--- Starting YouTube Subtitle Extraction ---", "blue")
             self._update_progress_gui(0, len(self.urls_to_process), "Preparing...")
@@ -908,10 +991,14 @@ class EBSToolPackGUI:
                 if r:  # Make sure r is not None before appending
                     results.append(r)
 
-                if i < total_urls - 1 and not self.stop_pipeline_flag:
-                    wait_time = random.randint(20, 25)
+                # NEW: Apply Rate Limit if enabled
+                if rate_limit_enabled and i < total_urls - 1 and not self.stop_pipeline_flag:
+                    wait_time = random.randint(min_wait_time, max_wait_time)
                     self.gui_log_output(f"⏳ Waiting {wait_time} seconds before next video.", "yellow")
                     time.sleep(wait_time)
+                elif not rate_limit_enabled and i < total_urls - 1:
+                    self.gui_log_output("Rate limit is disabled. Proceeding to next video without delay.", "blue")
+
 
             self._update_progress_gui(total_urls, total_urls, "Completed extraction.")
             save_results_merge(results, self.gui_log_output)
