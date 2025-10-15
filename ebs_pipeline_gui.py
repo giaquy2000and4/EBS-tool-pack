@@ -13,7 +13,6 @@ from typing import Optional, List, Dict, Any, Callable
 # ---- Block environment variables that may cause PermissionError
 os.environ.pop("SSLKEYLOGFILE", None)
 
-
 try:
     import certifi
 
@@ -143,12 +142,11 @@ def get_video_info(url: str, log_func: Callable[[str, Optional[str]], None],
             # Ensure yt-dlp extracts subtitle metadata, even if we download content ourselves
             'writesubtitles': True,
             'writeautomaticsub': True,
-            'subtitleslangs': [selected_lang], # Hint yt-dlp to look for this language
+            'subtitleslangs': [selected_lang],  # Hint yt-dlp to look for this language
         }
         if cookie_file_path and os.path.exists(cookie_file_path):
             ydl_opts['cookiefile'] = cookie_file_path
             log_func(f"Using cookie file: {os.path.basename(cookie_file_path)}", "blue")
-
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -156,7 +154,7 @@ def get_video_info(url: str, log_func: Callable[[str, Optional[str]], None],
                 'title': info.get('title', 'No title'),
                 'video_id': info.get('id', 'unknown'),
                 'url': url,
-                'subtitles': get_subtitles(info, selected_lang), # Call the modified function
+                'subtitles': get_subtitles(info, selected_lang),  # Call the modified function
                 'status': 'success'
             }
     except Exception as e:
@@ -222,6 +220,19 @@ def read_urls_from_file(file_path: str, log_func: Callable[[str, Optional[str]],
     return urls
 
 
+def sanitize_filename(title: str) -> str:
+    """Sanitizes a string to be used as a filename."""
+    # Remove characters that are illegal in Windows/Unix filenames
+    # This pattern covers: \ / : * ? " < > |
+    cleaned_title = re.sub(r'[\\/:*?"<>|]', '', title)
+    # Replace multiple spaces with a single underscore, and leading/trailing spaces
+    cleaned_title = re.sub(r'\s+', '_', cleaned_title).strip('_')
+    # Limit length to avoid extremely long filenames, common limit is 255 but 100-150 is safer
+    if len(cleaned_title) > 100:
+        cleaned_title = cleaned_title[:100]
+    return cleaned_title
+
+
 # ====== GUI Class ======
 class EBSToolPackGUI:
     def __init__(self):
@@ -251,6 +262,7 @@ class EBSToolPackGUI:
         self.urls_to_process: List[str] = []
         self.pipeline_running = False
         self.stop_pipeline_flag = False
+        self.use_title_for_subtitle_filename = ctk.BooleanVar(value=False)  # New state variable
 
         # Main container
         self.main_container = ctk.CTkFrame(self.root, fg_color=self.colors['bg'])
@@ -429,8 +441,23 @@ class EBSToolPackGUI:
         self.folder_prefix_entry.insert(0, "Ebs-")
         self.folder_prefix_entry.pack(fill="x", padx=15, pady=(0, 10))
 
-        ctk.CTkLabel(input_panel, text="Subtitle File Prefix (e.g., 'bcl-'):",
-                     text_color=self.colors['text']).pack(anchor="w", padx=15, pady=(10, 0))
+        # Subtitle File Prefix with Checkbox
+        subtitle_file_prefix_frame = ctk.CTkFrame(input_panel, fg_color="transparent")
+        subtitle_file_prefix_frame.pack(fill="x", padx=15, pady=(10, 0))
+
+        ctk.CTkLabel(subtitle_file_prefix_frame, text="Subtitle File Prefix (e.g., 'bcl-'):",
+                     text_color=self.colors['text']).pack(side="left", anchor="w")
+        self.use_title_checkbox = ctk.CTkCheckBox(
+            subtitle_file_prefix_frame,
+            text="Use Video Title",
+            variable=self.use_title_for_subtitle_filename,
+            command=self._toggle_subtitle_filename_source,
+            text_color=self.colors['text_dim'],
+            hover_color=self.colors['accent_hover'],
+            fg_color=self.colors['accent']
+        )
+        self.use_title_checkbox.pack(side="right", anchor="e", padx=(10, 0))
+
         self.subtitle_file_prefix_entry = ctk.CTkEntry(
             input_panel,
             placeholder_text="bcl-",
@@ -462,7 +489,7 @@ class EBSToolPackGUI:
             fg_color=self.colors['bg'],
             border_color=self.colors['accent']
         )
-        self.subtitle_lang_entry.insert(0, "en") # Default to English
+        self.subtitle_lang_entry.insert(0, "en")  # Default to English
         self.subtitle_lang_entry.pack(fill="x", padx=15, pady=(0, 10))
 
         ctk.CTkLabel(input_panel, text="Cookie File (.txt, optional, for age-restricted/private videos):",
@@ -487,7 +514,6 @@ class EBSToolPackGUI:
             width=80
         )
         self.browse_cookie_file_button.pack(side="left")
-
 
         # Start Button
         self.start_button = ctk.CTkButton(
@@ -547,6 +573,7 @@ class EBSToolPackGUI:
 
         self._update_url_list_display()
         self._update_end_num_label()
+        self._toggle_subtitle_filename_source()  # Set initial state of subtitle_file_prefix_entry
 
     def _add_input_section(self, parent: ctk.CTkFrame, title: str):
         """Helper to create a visually separated input section"""
@@ -668,6 +695,19 @@ class EBSToolPackGUI:
             self.cookie_file_entry.insert(0, file_path)
             self.gui_log_output(f"Cookie file selected: {os.path.basename(file_path)}", "blue")
 
+    def _toggle_subtitle_filename_source(self):
+        """Enables/disables subtitle file prefix entry based on checkbox state."""
+        if self.use_title_for_subtitle_filename.get():
+            self.subtitle_file_prefix_entry.configure(state="disabled")
+            # Clear the entry text when using video title
+            self.subtitle_file_prefix_entry.delete(0, ctk.END)
+            self.gui_log_output("Subtitle filename will use video title. Prefix entry disabled.", "blue")
+        else:
+            self.subtitle_file_prefix_entry.configure(state="normal")
+            # Re-insert default prefix if entry is empty
+            if not self.subtitle_file_prefix_entry.get().strip():
+                self.subtitle_file_prefix_entry.insert(0, "bcl-")
+            self.gui_log_output("Subtitle filename will use custom prefix. Prefix entry enabled.", "blue")
 
     def _update_end_num_label(self, event=None):
         try:
@@ -687,7 +727,6 @@ class EBSToolPackGUI:
                     # Auto-calculate pad_width if not specified or invalid
                     # It should be at least 1, and enough to fit the largest number
                     pad_width = max(1, len(str(max(start_num, end_num))))
-
 
                 formatted_end = f"{end_num:0{pad_width}d}"
                 self.end_num_label.configure(text=f"End number: {formatted_end}")
@@ -722,7 +761,8 @@ class EBSToolPackGUI:
 
         # Get new prefix values
         folder_prefix = self.folder_prefix_entry.get().strip()
-        subtitle_file_prefix = self.subtitle_file_prefix_entry.get().strip()
+        # Subtitle file prefix is only used if 'Use Video Title' is NOT checked
+        subtitle_file_prefix = self.subtitle_file_prefix_entry.get().strip() if not self.use_title_for_subtitle_filename.get() else ""
         content_file_prefix = self.content_file_prefix_entry.get().strip()
 
         # NEW: Get subtitle language and cookie file path
@@ -738,7 +778,6 @@ class EBSToolPackGUI:
         elif not cookie_file_path:
             self.gui_log_output("No cookie file specified. Proceeding without it.", "yellow")
 
-
         if not os.path.exists(dest_dir):
             try:
                 os.makedirs(dest_dir, exist_ok=True)
@@ -746,7 +785,6 @@ class EBSToolPackGUI:
             except Exception as e:
                 messagebox.showerror("Directory error", f"Cannot create root directory: {e}")
                 return
-
 
         if not self.urls_to_process:
             messagebox.showwarning("No URLs", "Please add at least one YouTube URL to process.")
@@ -765,7 +803,7 @@ class EBSToolPackGUI:
 
         threading.Thread(target=self._run_pipeline,
                          args=(start_num, pad_width, dest_dir, folder_prefix, subtitle_file_prefix,
-                               content_file_prefix, selected_lang, cookie_file_path), # Pass new args
+                               content_file_prefix, selected_lang, cookie_file_path),  # Pass new args
                          daemon=True).start()
 
     def _toggle_ui_state(self, enable: bool):
@@ -776,12 +814,17 @@ class EBSToolPackGUI:
         self.pad_width_entry.configure(state=state)
         self.dest_dir_entry.configure(state=state)
         self.folder_prefix_entry.configure(state=state)
-        self.subtitle_file_prefix_entry.configure(state=state)
+
+        # Only toggle subtitle_file_prefix_entry if 'Use Video Title' is OFF or if enabling everything
+        if enable or not self.use_title_for_subtitle_filename.get():
+            self.subtitle_file_prefix_entry.configure(state=state)
+        else:  # If 'use title' is ON and master switch is OFF, keep it disabled
+            self.subtitle_file_prefix_entry.configure(state="disabled")
+
         self.content_file_prefix_entry.configure(state=state)
         # NEW: toggle new widgets
         self.subtitle_lang_entry.configure(state=state)
         self.cookie_file_entry.configure(state=state)
-
 
         self.start_button.configure(state=state)
         self.add_url_button.configure(state=state)
@@ -790,7 +833,7 @@ class EBSToolPackGUI:
         self.browse_dest_dir_button.configure(state=state)
         # NEW: toggle new buttons
         self.browse_cookie_file_button.configure(state=state)
-
+        self.use_title_checkbox.configure(state=state)  # Toggle the new checkbox
 
         self.cancel_button.configure(state="normal" if not enable else "disabled")
         if not enable:
@@ -812,8 +855,8 @@ class EBSToolPackGUI:
 
     # MODIFIED: _run_pipeline to accept selected_lang and cookie_file_path
     def _run_pipeline(self, start_num: int, pad_width: int, dest_dir: str,
-                       folder_prefix: str, subtitle_file_prefix: str, content_file_prefix: str,
-                       selected_lang: str, cookie_file_path: Optional[str]):
+                      folder_prefix: str, subtitle_file_prefix: str, content_file_prefix: str,
+                      selected_lang: str, cookie_file_path: Optional[str]):
         try:
             self.gui_log_output("\n--- Starting YouTube Subtitle Extraction ---", "blue")
             self._update_progress_gui(0, len(self.urls_to_process), "Preparing...")
@@ -833,29 +876,37 @@ class EBSToolPackGUI:
                 vid = extract_video_id(url)
                 existing_index, _ = load_existing_index('youtube_results.json')
 
+                r = None  # Initialize r
                 if vid and vid in existing_index:
                     cached_item = existing_index[vid]
                     # If cached result looks like it has content and was successful, use it.
                     # Otherwise, re-extract for the current selected_lang.
+                    # We also re-extract if the current language doesn't match the cached one,
+                    # or if the user wants to use title for filename and we don't have title.
                     if cached_item.get('status') == 'success' and \
-                       not cached_item.get('subtitles', '').startswith("No ") and \
-                       not cached_item.get('subtitles', '').startswith("Error downloading"):
+                            not cached_item.get('subtitles', '').startswith("No ") and \
+                            not cached_item.get('subtitles', '').startswith("Error downloading") and \
+                            cached_item.get('extracted_lang') == selected_lang and \
+                            (not self.use_title_for_subtitle_filename.get() or cached_item.get('title')):
                         r = cached_item
-                        r.setdefault('url', url) # Ensure url is present
+                        r.setdefault('url', url)  # Ensure url is present
                         self.gui_log_output(f"↷ Using cached result for: {url}", "blue")
                     else:
-                        # Cached item is either an error, or explicitly says 'No subtitles available',
-                        # or was a previous run that failed. Re-extract for the current selected_lang.
-                        self.gui_log_output(f"Cached result for {url} needs re-extraction.", "yellow")
+                        self.gui_log_output(
+                            f"Cached result for {url} needs re-extraction (lang/title mismatch or error).", "yellow")
                         r = get_video_info(url, self.gui_log_output, selected_lang, cookie_file_path)
-                        r.setdefault('url', url) # Ensure url is present
+                        r['extracted_lang'] = selected_lang  # Store the language used for extraction
+                        r.setdefault('url', url)  # Ensure url is present
                         status_msg = f"{'✓ OK' if r.get('status') == 'success' else '✗ Error'} - {url}"
                         self.gui_log_output(status_msg, "green" if r.get('status') == 'success' else "red")
                 else:
-                    r = get_video_info(url, self.gui_log_output, selected_lang, cookie_file_path) # Pass new args
-                    results.append(r)
+                    r = get_video_info(url, self.gui_log_output, selected_lang, cookie_file_path)  # Pass new args
+                    r['extracted_lang'] = selected_lang  # Store the language used for extraction
                     status_msg = f"{'✓ OK' if r.get('status') == 'success' else '✗ Error'} - {url}"
                     self.gui_log_output(status_msg, "green" if r.get('status') == 'success' else "red")
+
+                if r:  # Make sure r is not None before appending
+                    results.append(r)
 
                 if i < total_urls - 1 and not self.stop_pipeline_flag:
                     wait_time = random.randint(20, 25)
@@ -878,36 +929,43 @@ class EBSToolPackGUI:
                 file_num = start_num + idx
                 numbered_suffix = f"{file_num:0{pad_width}d}"
 
-
                 current_video_folder = os.path.join(dest_dir, f"{folder_prefix}{numbered_suffix}")
                 os.makedirs(current_video_folder, exist_ok=True)
                 self.gui_log_output(f"Created folder: {current_video_folder}", "blue")
 
-                # Subtitle file
-                subtitle_filename = f"{subtitle_file_prefix}{numbered_suffix}.txt"
+                # Determine subtitle filename based on checkbox state
+                if self.use_title_for_subtitle_filename.get():
+                    video_title = r.get('title', 'Unknown_Video_Title')
+                    cleaned_title = sanitize_filename(video_title)
+                    subtitle_filename = f"{numbered_suffix}. {cleaned_title}.txt"
+                else:
+                    subtitle_filename = f"{subtitle_file_prefix}{numbered_suffix}.txt"
+
                 subtitle_filepath = os.path.join(current_video_folder, subtitle_filename)
 
                 # Content file (empty)
-                content_filename = f"{content_file_prefix}{numbered_suffix}.txt" # No .txt extension
+                content_filename = f"{content_file_prefix}{numbered_suffix}.txt"
                 content_filepath = os.path.join(current_video_folder, content_filename)
-
 
                 if r.get('status') != 'success':
                     error_msg = r.get('error', 'Unknown error')
                     with open(subtitle_filepath, 'w', encoding='utf-8') as f:
                         f.write(f"ERROR: {error_msg}\n")
                         f.write(f"URL: {r.get('url', 'N/A')}\n")
-                    self.gui_log_output(f"⚠ Saved error note for {subtitle_filename} in {os.path.basename(current_video_folder)}", "yellow")
+                    self.gui_log_output(
+                        f"⚠ Saved error note for {subtitle_filename} in {os.path.basename(current_video_folder)}",
+                        "yellow")
                 else:
-                    subtitle_content = r.get('subtitles', f'No {selected_lang} subtitles available') # Use selected_lang in default message
+                    subtitle_content = r.get('subtitles',
+                                             f'No {selected_lang} subtitles available')  # Use selected_lang in default message
                     try:
                         with open(subtitle_filepath, 'w', encoding='utf-8') as f:
                             f.write(subtitle_content)
                         saved_count += 1
-                        self.gui_log_output(f"✓ Saved subtitle: {subtitle_filename} - {r.get('title', 'Unknown')}", "green")
+                        self.gui_log_output(f"✓ Saved subtitle: {subtitle_filename} - {r.get('title', 'Unknown')}",
+                                            "green")
                     except Exception as e:
                         self.gui_log_output(f"✗ Error saving subtitle {subtitle_filename}: {e}", "red")
-
 
                 try:
                     with open(content_filepath, 'w', encoding='utf-8') as f:
@@ -918,8 +976,9 @@ class EBSToolPackGUI:
 
                 self._update_progress_gui(idx + 1, len(results), f"Saving files for video {idx + 1}/{len(results)}")
 
-            self.gui_log_output(f"\n→ Successfully processed {saved_count}/{len(results)} videos with files saved to subfolders under: {dest_dir}",
-                                "green")
+            self.gui_log_output(
+                f"\n→ Successfully processed {saved_count}/{len(results)} videos with files saved to subfolders under: {dest_dir}",
+                "green")
             messagebox.showinfo("Pipeline Complete",
                                 f"Successfully processed {saved_count} videos!\n\nOutput root: {dest_dir}")
 
