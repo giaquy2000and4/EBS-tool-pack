@@ -91,7 +91,7 @@ def clean_subtitles(subtitle_content):
     return "\n".join(out) or "Unable to extract subtitle content"
 
 
-# MODIFIED: get_english_subtitles -> get_subtitles (now takes lang_code)
+
 def get_subtitles(info: Dict[str, Any], lang_code: str):
     """Get subtitles for a specific language from video info"""
     try:
