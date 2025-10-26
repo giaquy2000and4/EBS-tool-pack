@@ -10,7 +10,7 @@ import time
 import json
 from typing import Optional, List, Dict, Any, Callable
 
-# ---- Block environment variables that may cause PermissionError
+
 os.environ.pop("SSLKEYLOGFILE", None)
 
 try:
